@@ -1,0 +1,57 @@
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+from gensim.models import Word2Vec
+from gensim.utils import simple_preprocess
+
+# Load the datasets
+products_df = pd.read_csv('/mnt/data/mm_products_short.tsv', delimiter='\t')
+recipes_df = pd.read_csv('/mnt/data/mm_receipe.csv')
+search_events_df = pd.read_csv('/mnt/data/search_event_short.csv')
+
+# Compute popularity based on the frequency of searches for each keyword
+keyword_popularity = search_events_df['keywords'].value_counts().reset_index()
+keyword_popularity.columns = ['keywords', 'search_frequency']
+
+# Associate search frequencies with products and recipes
+products_popularity = pd.merge(products_df, keyword_popularity, left_on='title', right_on='keywords', how='left').fillna(0)
+recipes_popularity = pd.merge(recipes_df, keyword_popularity, left_on='name', right_on='keywords', how='left').fillna(0)
+
+# Handle missing values in products and recipes data
+products_df['combined_text'] = (products_df['title'] + ' ' + products_df['description']).fillna('')
+recipes_df['combined_text'] = (recipes_df['name'] + ' ' + recipes_df['description']).fillna('')
+
+# Initialize and train the TF-IDF vectorizer
+vectorizer = TfidfVectorizer(stop_words='english')
+vectorizer.fit(pd.concat([products_df['combined_text'], recipes_df['combined_text']]))
+
+# Tokenize product and recipe descriptions and train a Word2Vec model
+tokenized_products = products_df['combined_text'].apply(simple_preprocess)
+tokenized_recipes = recipes_df['combined_text'].apply(simple_preprocess)
+all_text = tokenized_products.tolist() + tokenized_recipes.tolist()
+model = Word2Vec(sentences=all_text, vector_size=100, window=5, min_count=1, workers=4)
+model.train(all_text, total_examples=len(all_text), epochs=10)
+
+# Define search function with keyword expansion
+def get_relevant_items_with_embeddings(query, top_n=10, expansion_n=3):
+    try:
+        expanded_keywords = [word[0] for word in model.wv.most_similar(query, topn=expansion_n)]
+    except:
+        expanded_keywords = []  # Handle words not in vocabulary
+    combined_query = query + ' ' + ' '.join(expanded_keywords)
+    query_vector = vectorizer.transform([combined_query])
+    product_scores = products_df['combined_text'].apply(lambda x: (vectorizer.transform([x]).dot(query_vector.T)).toarray()[0][0])
+    recipe_scores = recipes_df['combined_text'].apply(lambda x: (vectorizer.transform([x]).dot(query_vector.T)).toarray()[0][0])
+    product_scores += products_popularity['search_frequency'] * 0.1
+    recipe_scores += recipes_popularity['search_frequency'] * 0.1
+    if query in keyword_stock_ratio['keywords'].values:
+        stock_boost = keyword_stock_ratio[keyword_stock_ratio['keywords'] == query]['in_stock_ratio'].values[0]
+        product_scores *= (1 + stock_boost)
+    top_products = products_df.iloc[product_scores.nlargest(top_n).index]
+    top_recipes = recipes_df.iloc[recipe_scores.nlargest(top_n).index]
+    return top_products, top_recipes
+
+# Sample test
+sample_query = "Chou"
+top_products_with_embeddings, top_recipes_with_embeddings = get_relevant_items_with_embeddings(sample_query)
+print(top_products_with_embeddings[['title', 'description']])
+print(top_recipes_with_embeddings[['name', 'description']])
