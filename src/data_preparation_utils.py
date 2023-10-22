@@ -7,9 +7,9 @@ def check_duplicates(df, subset=None):
 
     Parameters:
     df (pd.DataFrame): The DataFrame to check for duplicates.
-    subset (list of str, optional): List of column names to consider for identifying duplicates. 
+    subset (list of str, optional): List of column names to consider for identifying duplicates.
                                     If None, all columns are considered. Default is None.
-    
+
     Returns:
     bool: True if duplicates are found, False otherwise.
     """
