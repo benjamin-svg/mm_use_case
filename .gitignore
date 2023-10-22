@@ -162,3 +162,4 @@ cython_debug/
 # Personal files
 data/
 .DS_Store
+model/
